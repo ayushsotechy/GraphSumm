@@ -1,0 +1,11 @@
+langchain
+langchain-community
+langchain-experimental
+langchain-groq
+neo4j
+python-dotenv
+streamlit
+pypdf
+sentence-transformers
+torchvision
+torch
