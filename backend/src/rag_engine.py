@@ -15,23 +15,31 @@ load_dotenv()
 graph = Neo4jGraph(
     url=os.getenv("NEO4J_URI"),
     username=os.getenv("NEO4J_USERNAME"),
-    password=os.getenv("NEO4J_PASSWORD")
+    password=os.getenv("NEO4J_PASSWORD"),
+    database=os.getenv("NEO4J_DATABASE")  # Fixed: use NEO4J_DATABASE not NEO4J_USERNAME
 )
 # 2. Setup LLM & Embeddings
 llm = ChatGroq(temperature=0, model_name="llama-3.3-70b-versatile")
 embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
-# 3. Setup Vector Search Retriever
-vector_store = Neo4jVector.from_existing_graph(
-    embedding=embeddings,
-    url=os.getenv("NEO4J_URI"),
-    username=os.getenv("NEO4J_USERNAME"),
-    password=os.getenv("NEO4J_PASSWORD"),
-    index_name="vector_index",
-    node_label="Chunk",
-    text_node_properties=["text"],
-    embedding_node_property="embedding"
-)
+# 3. Setup Vector Search Retriever (lazy-loaded to avoid crash if index doesn't exist yet)
+_vector_store = None
+
+def get_vector_store():
+    global _vector_store
+    if _vector_store is None:
+        _vector_store = Neo4jVector.from_existing_graph(
+            embedding=embeddings,
+            url=os.getenv("NEO4J_URI"),
+            username=os.getenv("NEO4J_USERNAME"),
+            password=os.getenv("NEO4J_PASSWORD"),
+            database=os.getenv("NEO4J_DATABASE"),  # Fixed: use NEO4J_DATABASE
+            index_name="vector_index",
+            node_label="Chunk",
+            text_node_properties=["text"],
+            embedding_node_property="embedding"
+        )
+    return _vector_store
 
 # 4. Setup Graph Search (Cypher)
 # 4. Setup Graph Search (Cypher)
@@ -77,7 +85,7 @@ def get_answer(question):
         # A. Run Graph Search - SAFELY PARSED
         graph_result = "No relevant graph connections found."
         try:
-            graph_data = graph_chain.invoke(question)
+            graph_data = graph_chain.invoke({"query": question})  # Fixed: invoke needs a dict
             
             # Check if 'result' exists AND is not an empty list [] or empty string ""
             if 'result' in graph_data and graph_data['result']:
@@ -87,7 +95,7 @@ def get_answer(question):
             graph_result = f"Graph search failed: {str(e)}"
 
         # B. Run Vector Search (Semantic)
-        vector_results = vector_store.similarity_search(question, k=2)
+        vector_results = get_vector_store().similarity_search(question, k=2)
         vector_text = "\n".join([doc.page_content for doc in vector_results])
         
         # C. Combine Contexts
